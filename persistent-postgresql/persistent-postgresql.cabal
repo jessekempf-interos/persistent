@@ -52,6 +52,7 @@ test-suite test
                      EquivalentTypeTestPostgres
                      JSONTest
                      CustomConstraintTest
+                     CustomSchemaTest
                      PgIntervalTest
     ghc-options:     -Wall
 

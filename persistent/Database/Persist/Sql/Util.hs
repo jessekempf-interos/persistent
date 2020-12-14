@@ -18,6 +18,8 @@ module Database.Persist.Sql.Util
     , parenWrapped
     , mkInsertValues
     , mkInsertPlaceholders
+    , resolveTableDef
+    , resolveTableName
     ) where
 
 import qualified Data.Maybe as Maybe
@@ -34,6 +36,7 @@ import Database.Persist (
   , FieldDef(..)
   )
 
+import Database.Persist.Sql.Internal (resolveTableDef, resolveTableName)
 import Database.Persist.Sql.Types (Sql, SqlBackend, connEscapeFieldName)
 
 entityColumnNames :: EntityDef -> SqlBackend -> [Sql]

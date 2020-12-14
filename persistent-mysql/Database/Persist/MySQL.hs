@@ -344,7 +344,7 @@ migrate' :: MySQL.ConnectInfo
 migrate' connectInfo allDefs getter val = do
     let name = entityDB val
     let (newcols, udefs, fdefs) = mysqlMkColumns allDefs val
-    old <- getColumns connectInfo getter val newcols
+    old <- getColumns connectInfo allDefs getter val newcols
     let udspair = map udToPair udefs
     case ([], old, partitionEithers old) of
         -- Nothing found, create everything
@@ -359,7 +359,7 @@ migrate' connectInfo allDefs getter val = do
             let foreigns = do
                     Column { cName=cname, cReference=Just cRef } <- newcols
                     let refConstraintName = crConstraintName cRef
-                    let refTblName = crTableName cRef
+                    let refTblName = entityDB $ crTable cRef
                     let refTarget =
                           addReference allDefs refConstraintName refTblName cname (crFieldCascade cRef)
 
@@ -563,10 +563,11 @@ udToPair ud = (uniqueDBName ud, map snd $ uniqueFields ud)
 getColumns
     :: HasCallStack
     => MySQL.ConnectInfo
+    -> [EntityDef]
     -> (Text -> IO Statement)
     -> EntityDef -> [Column]
     -> IO [Either Text (Either Column (ConstraintNameDB, [FieldNameDB]))]
-getColumns connectInfo getter def cols = do
+getColumns connectInfo allDefs getter def cols = do
 
     -- Find out all columns.
     stmtClmns <- getter $ T.concat
@@ -618,7 +619,7 @@ getColumns connectInfo getter def cols = do
         where
           getIt row = fmap (either Left (Right . Left)) .
                       liftIO .
-                      getColumn connectInfo getter (entityDB def) row $ ref
+                      getColumn connectInfo allDefs getter (entityDB def) row $ ref
             where ref = case row of
                     (PersistText cname : _) -> (Map.lookup cname refMap)
                     _ -> Nothing
@@ -636,12 +637,13 @@ getColumns connectInfo getter def cols = do
 getColumn
     :: HasCallStack
     => MySQL.ConnectInfo
+    -> [EntityDef]
     -> (Text -> IO Statement)
     -> EntityNameDB
     -> [PersistValue]
     -> Maybe ColumnReference
     -> IO (Either Text Column)
-getColumn connectInfo getter tname [ PersistText cname
+getColumn connectInfo allDefs getter tname [ PersistText cname
                                    , PersistText null_
                                    , PersistText dataType
                                    , PersistText colType
@@ -758,10 +760,13 @@ getColumn connectInfo getter tname [ PersistText cname
                 Nothing
             [[PersistText tab, PersistText ref, PersistInt64 pos, PersistText onDel, PersistText onUpd]] ->
                 if pos == 1
-                then Just $ ColumnReference (EntityNameDB tab) (ConstraintNameDB ref) FieldCascade
-                    { fcOnUpdate = parseCascadeAction onUpd
-                    , fcOnDelete = parseCascadeAction onDel
-                    }
+                then Just $ ColumnReference
+                                (Util.resolveTableName allDefs $ EntityNameDB tab)
+                                (ConstraintNameDB ref)
+                                FieldCascade
+                                    { fcOnUpdate = parseCascadeAction onUpd
+                                    , fcOnDelete = parseCascadeAction onDel
+                                    }
                 else Nothing
             xs -> error $ mconcat
               [ "MySQL.getColumn/getRef: error fetching constraints. Expected a single result for foreign key query for table: "
@@ -772,7 +777,7 @@ getColumn connectInfo getter tname [ PersistText cname
               , show xs
               ]
 
-getColumn _ _ _ x  _ =
+getColumn _ _ _ _ x  _ =
     return $ Left $ pack $ "Invalid result from INFORMATION_SCHEMA: " ++ show x
 
 -- | Extra column information from MySQL schema
@@ -873,7 +878,7 @@ findAlters edef allDefs col@(Column name isNull type_ def gen _defConstraintName
             case ref of
                 Nothing -> ([Add' col],[])
                 Just cr ->
-                    let tname = crTableName cr
+                    let tname = entityDB $ crTable cr
                         cname = crConstraintName cr
                         cnstr = [addReference allDefs cname tname name (crFieldCascade cr)]
                     in
@@ -888,11 +893,11 @@ findAlters edef allDefs col@(Column name isNull type_ def gen _defConstraintName
                             []
                 refAdd  =
                     case (ref == ref', ref) of
-                        (False, Just ColumnReference {crTableName=tname, crConstraintName=cname, crFieldCascade = cfc })
-                            | tname /= entityDB edef
+                        (False, Just ColumnReference {crTable=tdef, crConstraintName=cname, crFieldCascade = cfc })
+                            | tdef /= edef
                             , unConstraintNameDB cname /= unFieldNameDB (fieldDB (entityId edef))
                             ->
-                            [addReference allDefs cname tname name cfc]
+                            [addReference allDefs cname (entityDB tdef) name cfc]
                         _ -> []
                 -- Type and nullability
                 modType | showSqlType type_ maxLen False `ciEquals` showSqlType type_' maxLen' False && isNull == isNull' = []
@@ -946,7 +951,7 @@ showColumn (Column n nu t def gen _defConstraintName maxLen ref) = concat
                   else " DEFAULT " ++ T.unpack s
     , case ref of
         Nothing -> ""
-        Just cRef -> " REFERENCES " ++ escapeE (crTableName cRef)
+        Just cRef -> " REFERENCES " ++ escapeE (entityDB $ crTable cRef)
             <> " " <> T.unpack (renderFieldCascade (crFieldCascade cRef))
     ]
 
@@ -1211,8 +1216,8 @@ mockMigrate _connectInfo allDefs _getter val = do
                         AddUniqueConstraint uname $
                         map (findTypeAndMaxLen name) ucols ]
         let foreigns = do
-              Column { cName=cname, cReference= Just ColumnReference{crTableName = refTable, crConstraintName = refConstr, crFieldCascade = cfc }} <- newcols
-              return $ AlterColumn name (addReference allDefs refConstr refTable cname cfc)
+              Column { cName=cname, cReference= Just ColumnReference{crTable = refTable, crConstraintName = refConstr, crFieldCascade = cfc }} <- newcols
+              return $ AlterColumn name (addReference allDefs refConstr (entityDB refTable) cname cfc)
 
         let foreignsAlt =
                 map

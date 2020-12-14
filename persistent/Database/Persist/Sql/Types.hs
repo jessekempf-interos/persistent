@@ -38,7 +38,7 @@ data Column = Column
 --
 -- @since 2.11.0.0
 data ColumnReference = ColumnReference
-    { crTableName :: !EntityNameDB
+    { crTable :: !EntityDef
     -- ^ The table name that the
     --
     -- @since 2.11.0.0

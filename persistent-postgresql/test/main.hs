@@ -55,6 +55,7 @@ import qualified CustomConstraintTest
 import qualified LongIdentifierTest
 import qualified PgIntervalTest
 import qualified GeneratedColumnTestSQL
+import qualified CustomSchemaTest
 
 type Tuple = (,)
 
@@ -198,3 +199,4 @@ main = do
     PgIntervalTest.specs
     ArrayAggTest.specs
     GeneratedColumnTestSQL.specsWith runConnAssert
+    CustomSchemaTest.specs

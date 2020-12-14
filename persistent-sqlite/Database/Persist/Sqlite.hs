@@ -596,8 +596,8 @@ sqlColumn noRef (Column name isNull typ def gen _cn _maxLen ref) = T.concat
     , mayGenerated gen
     , case ref of
         Nothing -> ""
-        Just ColumnReference {crTableName=table, crFieldCascade=cascadeOpts} ->
-          if noRef then "" else " REFERENCES " <> escapeE table
+        Just ColumnReference {crTable=table, crFieldCascade=cascadeOpts} ->
+          if noRef then "" else " REFERENCES " <> escapeE (entityDB table)
             <> onDelete cascadeOpts <> onUpdate cascadeOpts
     ]
   where

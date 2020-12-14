@@ -9,6 +9,8 @@ module Database.Persist.Sql.Internal
     , defaultAttribute
     , BackendSpecificOverrides(..)
     , emptyBackendSpecificOverrides
+    , resolveTableDef
+    , resolveTableName
     ) where
 
 import Control.Applicative ((<|>))
@@ -126,8 +128,8 @@ mkColumns allDefs t overrides =
     mkColumnReference :: FieldDef -> Maybe ColumnReference
     mkColumnReference fd =
         fmap
-            (\(tName, cName) ->
-                ColumnReference tName cName $ overrideNothings $ fieldCascade fd
+            (\(tDef, cName) ->
+                ColumnReference tDef cName $ overrideNothings $ fieldCascade fd
             )
         $ ref (fieldDB fd) (fieldReference fd) (fieldAttrs fd)
 
@@ -143,16 +145,16 @@ mkColumns allDefs t overrides =
     ref :: FieldNameDB
         -> ReferenceDef
         -> [FieldAttr]
-        -> Maybe (EntityNameDB, ConstraintNameDB) -- table name, constraint name
+        -> Maybe (EntityDef, ConstraintNameDB) -- table name, constraint name
     ref c fe []
         | ForeignRef f _ <- fe =
-            Just (resolveTableName allDefs f, refNameFn tableName c)
+            Just (resolveTableDef allDefs f, refNameFn tableName c)
         | otherwise = Nothing
     ref _ _ (FieldAttrNoreference:_) = Nothing
     ref c fe (a:as) = case a of
         FieldAttrReference x -> do
             (_, constraintName) <- ref c fe as
-            pure (EntityNameDB  x, constraintName)
+            pure (resolveTableName allDefs (EntityNameDB x), constraintName)
         FieldAttrConstraint x -> do
             (tableName_, _) <- ref c fe as
             pure (tableName_, ConstraintNameDB x)
@@ -162,8 +164,19 @@ refName :: EntityNameDB -> FieldNameDB -> ConstraintNameDB
 refName (EntityNameDB table) (FieldNameDB column) =
     ConstraintNameDB $ Data.Monoid.mconcat [table, "_", column, "_fkey"]
 
-resolveTableName :: [EntityDef] -> EntityNameHS -> EntityNameDB
-resolveTableName [] (EntityNameHS t) = error $ "Table not found: " `Data.Monoid.mappend` T.unpack t
-resolveTableName (e:es) hn
-    | entityHaskell e == hn = entityDB e
-    | otherwise = resolveTableName es hn
+resolveTableDef :: [EntityDef] -> EntityNameHS -> EntityDef
+resolveTableDef [] (EntityNameHS t) = error $ "Table not found: " `Data.Monoid.mappend` T.unpack t
+resolveTableDef (e:es) hn
+    | entityHaskell e == hn = e
+    | otherwise             = resolveTableDef es hn
+
+resolveTableName :: [EntityDef] -> EntityNameDB -> EntityDef
+resolveTableName defs name =
+    case filter (\def -> entityDB def == name) defs of
+        [] -> error $ "Table not found: " <> tname
+        [def] -> def
+        many -> error $ "Given named reference to table " <> tname
+                        <> ", but there are " <> show (length many)
+                        <> " tables with that name."
+  where
+    tname = T.unpack (unEntityNameDB name)
